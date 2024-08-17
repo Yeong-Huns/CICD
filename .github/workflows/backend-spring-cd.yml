@@ -1,0 +1,71 @@
+name: 📌 ci-cd Test
+
+env:
+  PROFILE: dev
+  DOCKER_HUB_REPOSITORY: yeonghuns/ci-cd-test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+    - main
+
+jobs:
+  backend-docker-build-and-push:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          submodules: true
+          token: ${{ secrets.ACTION_TOKEN }}
+
+      - name: 📌 JDK 17 설정
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'corretto'
+
+      - name: 📌 Gradle Caching
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+             ${{ runner.os }}-gradle-
+
+      - name: 📌 Gradlew 권한 설정
+        run: chmod +x ./gradlew
+
+      - name: 📌 Jar 파일 빌드
+        run: ./gradlew bootJar
+
+      - name: 📌 DockerHub에 로그인
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD }}
+
+      - name: 📌 Docker Image 빌드 후 DockerHub에 Push
+        uses: docker/build-push-action@v4
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile-dev
+          push: true
+          platforms: linux/arm64
+          tags: ${{ env.DOCKER_HUB_REPOSITORY }}:latest
+
+  backend-docker-pull-and-run:
+    runs-on: [self-hosted, dev]
+    if: ${{ needs.backend-docker-build-and-push.result == 'success' }}
+    needs: [ backend-docker-build-and-push ]
+    steps:
+    - name: 📌 배포 스크립트 실행
+      run: |
+        sh /home/ubuntu/deploy.sh
